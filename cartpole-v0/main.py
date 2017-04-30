@@ -1,4 +1,6 @@
 import gym, numpy, collections, copy
+import h5py
+import pickle
 from keras.models import Sequential
 from keras.layers import Dense
 from keras.optimizers import RMSprop
@@ -8,7 +10,7 @@ env._max_episode_steps = 4000
 
 class Model:
     def __init__(self):
-        self.memory = collections.deque(maxlen = 2000000)
+        self.memory = collections.deque(maxlen = 100000)
         self.model = Sequential([
             Dense(20, input_dim = 4, activation = "tanh"),
             Dense(20, activation = "tanh", init = "uniform"),
@@ -22,7 +24,8 @@ class Model:
         self.explore_decay = 0.99
         self.explore_min = 0.05
         self.learn_rate = .01
-        self.filename = "cartpole-ai"
+        self.filename = "cartpole-ai.h5"
+        self.memory_filename = "cartpole-ai-memory.npy"
 
     def remember(self, data):
         self.memory.append(data)
@@ -64,14 +67,42 @@ class Model:
         self.explore_rate = max(self.explore_min, self.explore_rate * self.explore_decay)
 
     def load_model(self):
-        self.model.load(filename)
+        try:
+            self.model.load_weights(self.filename)
+
+            # Load using .npy format, which in turn invokes Pickle.
+            self.memory = numpy.load(self.memory_filename)
+
+            # Load using hdf5storage, but the library seems to be broken.
+            #self.memory = collections.deque(
+            #    hdf5storage.read(filename = "cartpole-ai-memory.h5"),
+            #    maxlen = 100000
+            #)
+
+            # Load using h5py, but h5py does not support O-type (generic) numpy objects.
+            #with h5py.File('cartpole-ai-memory.h5', 'r') as hf:
+            #    self.memory = collections.deque(hf['cartpole-ai-memory'][:], maxlen = 100000)
+        except (IOError, KeyError) as e:
+            print(e)
+            print("Model not found. Ignoring.")
 
     def save_model(self):
-        self.model.save(filename)
+        self.model.save_weights(self.filename)
+        
+        # Save using .npy format, which in turn invokes Pickle.
+        numpy.save(self.memory_filename, self.memory)
+        
+        # Save using hdf5storage, but the library seems to be broken.
+        #hdf5storage.write(data = np.array(list(self.memory)), filename = "cartpole-ai-memory.h5")
+        
+        # Save using h5py, but h5py does not support O-type (generic) numpy objects.
+        #with h5py.File('cartpole-ai-memory.h5', 'w') as hf:
+        #        hf.create_dataset("cartpole-ai-memory",  data = self.memory)
 
 episode_num = 1
+graphical = True
 def run_episode():
-    global episode_num
+    global episode_num, graphical
 
     observation = env.reset()
     observation = numpy.reshape(observation, [1, 4])
@@ -81,7 +112,14 @@ def run_episode():
 
     for _ in range(1000):
         new_memories += 1
-        #env.render()
+
+        if graphical:
+            try:
+                    env.render()
+            except AttributeError:
+                print("The window was closed.")
+                graphical = False
+
         action = ai.action(observation)
         next_state, reward, done, info = \
             env.step(action)
@@ -106,8 +144,6 @@ def run_episode():
 
 ai = Model()
 ai.load_model()
-try:
-    while True:
+for episode in range(50):
         run_episode()
-except KeyboardInterrupt:
-    ai.save_model()
+ai.save_model()
